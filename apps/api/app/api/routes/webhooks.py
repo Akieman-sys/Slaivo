@@ -3,6 +3,8 @@ from fastapi.responses import PlainTextResponse
 import os
 import json
 
+from app.services.whatsapp_parser import normalize_whatsapp_message
+
 router = APIRouter()
 
 
@@ -29,8 +31,15 @@ async def verify_whatsapp_webhook(
 @router.post("/whatsapp")
 async def receive_whatsapp_webhook(request: Request):
     payload = await request.json()
+    normalized_message = normalize_whatsapp_message(payload)
 
     print("=== WHATSAPP WEBHOOK RECEIVED ===")
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
-    return {"status": "received"}
+    print("=== NORMALIZED MESSAGE ===")
+    print(json.dumps(normalized_message, indent=2, ensure_ascii=False))
+
+    return {
+        "status": "received",
+        "normalized_message": normalized_message,
+    }
