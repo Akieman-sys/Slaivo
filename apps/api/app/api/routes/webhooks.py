@@ -4,6 +4,8 @@ import os
 import json
 
 from app.services.whatsapp_parser import normalize_whatsapp_message
+from app.utils.tracking import extract_tracking_id
+from app.repositories.shipments import find_shipment_by_tracking_id
 
 router = APIRouter()
 
@@ -39,7 +41,29 @@ async def receive_whatsapp_webhook(request: Request):
     print("=== NORMALIZED MESSAGE ===")
     print(json.dumps(normalized_message, indent=2, ensure_ascii=False))
 
+    tracking_id = None
+    shipment = None
+
+    if normalized_message:
+        tracking_id = extract_tracking_id(normalized_message.get("text_body"))
+        if tracking_id:
+            shipment = find_shipment_by_tracking_id(tracking_id)
+
+    print("=== TRACKING LOOKUP ===")
+    print(json.dumps(
+        {
+            "tracking_id": tracking_id,
+            "shipment_found": shipment is not None,
+            "shipment": shipment,
+        },
+        indent=2,
+        ensure_ascii=False,
+        default=str,
+    ))
+
     return {
         "status": "received",
         "normalized_message": normalized_message,
+        "tracking_id": tracking_id,
+        "shipment": shipment,
     }
