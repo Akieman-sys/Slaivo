@@ -89,3 +89,77 @@ def create_agent_outbound_message(
             cur.execute(update_conversation_query, (conversation_id,))
 
             return dict(zip(columns, row))
+
+def create_system_outbound_message(
+    conversation_id: str,
+    from_phone: str,
+    to_phone: str,
+    text_body: str,
+    trigger_type: str,
+    related_shipment_id: str | None = None,
+) -> dict:
+    query = """
+        insert into messages (
+            conversation_id,
+            direction,
+            message_type,
+            text_body,
+            trigger_type,
+            status,
+            from_phone,
+            to_phone,
+            related_shipment_id,
+            sent_at
+        )
+        values (
+            %s,
+            'outbound',
+            'text',
+            %s,
+            %s,
+            'pending',
+            %s,
+            %s,
+            %s,
+            now()
+        )
+        returning
+            id,
+            conversation_id,
+            direction,
+            message_type,
+            text_body,
+            trigger_type,
+            status,
+            from_phone,
+            to_phone,
+            related_shipment_id,
+            sent_at,
+            created_at
+    """
+
+    update_conversation_query = """
+        update conversations
+        set last_message_at = now(),
+            updated_at = now()
+        where id = %s
+    """
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                query,
+                (
+                    conversation_id,
+                    text_body,
+                    trigger_type,
+                    from_phone,
+                    to_phone,
+                    related_shipment_id,
+                ),
+            )
+            row = cur.fetchone()
+            columns = [desc[0] for desc in cur.description]
+
+            cur.execute(update_conversation_query, (conversation_id,))
+            return dict(zip(columns, row))
