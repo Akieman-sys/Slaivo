@@ -3,14 +3,22 @@ from fastapi.responses import PlainTextResponse
 import os
 import json
 
+from app.core.logging import get_logger
 from app.services.whatsapp_parser import normalize_whatsapp_message
 from app.services.intent_router import detect_intent
 from app.services.reply_builder import build_tracking_reply, build_knowledge_reply
 from app.utils.tracking import extract_tracking_id
 from app.repositories.shipments import find_shipment_by_tracking_id
 from app.repositories.knowledge import find_active_knowledge_item
+from app.repositories.conversations import (
+    find_conversation_by_customer_phone,
+    create_conversation,
+    touch_conversation,
+)
+from app.repositories.messages import create_inbound_message
 
 router = APIRouter()
+logger = get_logger("slaivo.webhooks")
 
 
 @router.get("/whatsapp", response_class=PlainTextResponse)
@@ -38,16 +46,18 @@ async def receive_whatsapp_webhook(request: Request):
     payload = await request.json()
     normalized_message = normalize_whatsapp_message(payload)
 
-    print("=== WHATSAPP WEBHOOK RECEIVED ===")
-    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    logger.info("WhatsApp webhook received")
+    logger.info(json.dumps(payload, indent=2, ensure_ascii=False))
 
-    print("=== NORMALIZED MESSAGE ===")
-    print(json.dumps(normalized_message, indent=2, ensure_ascii=False))
+    logger.info("Normalized message")
+    logger.info(json.dumps(normalized_message, indent=2, ensure_ascii=False, default=str))
 
     intent = "unknown"
     reply = None
     shipment = None
     tracking_id = None
+    conversation = None
+    inbound_message = None
 
     if normalized_message:
         text_body = normalized_message.get("text_body")
@@ -87,11 +97,36 @@ async def receive_whatsapp_webhook(request: Request):
                 "should_escalate": True,
             }
 
-    print("=== INTENT ===")
-    print(intent)
+        from_phone = normalized_message.get("from_phone")
+        to_phone = normalized_message.get("to_phone")
+        related_shipment_id = shipment["id"] if shipment else None
 
-    print("=== REPLY ===")
-    print(json.dumps(reply, indent=2, ensure_ascii=False, default=str))
+        conversation = find_conversation_by_customer_phone(from_phone)
+        if not conversation:
+            conversation = create_conversation(
+                customer_phone=from_phone,
+                related_shipment_id=related_shipment_id,
+                priority="medium" if reply and reply.get("should_escalate") else "low",
+            )
+        else:
+            touch_conversation(conversation["id"])
+
+        inbound_message = create_inbound_message(
+            conversation_id=conversation["id"],
+            provider_message_id=normalized_message.get("provider_message_id"),
+            message_type=normalized_message.get("message_type") or "text",
+            text_body=normalized_message.get("text_body"),
+            intent=intent,
+            from_phone=from_phone,
+            to_phone=to_phone,
+            raw_payload=payload,
+            related_shipment_id=related_shipment_id,
+            dedupe_key=normalized_message.get("dedupe_key"),
+            received_at=normalized_message.get("received_at"),
+        )
+
+    logger.info(f"Intent detected: {intent}")
+    logger.info(json.dumps(reply, indent=2, ensure_ascii=False, default=str))
 
     return {
         "status": "received",
@@ -99,5 +134,7 @@ async def receive_whatsapp_webhook(request: Request):
         "intent": intent,
         "tracking_id": tracking_id,
         "shipment": shipment,
+        "conversation": conversation,
+        "inbound_message": inbound_message,
         "reply": reply,
     }

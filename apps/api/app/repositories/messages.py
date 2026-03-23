@@ -1,4 +1,7 @@
 from app.core.db import get_db_connection
+from psycopg.types.json import Json
+
+
 
 
 def create_agent_outbound_message(
@@ -162,4 +165,89 @@ def create_system_outbound_message(
             columns = [desc[0] for desc in cur.description]
 
             cur.execute(update_conversation_query, (conversation_id,))
+            return dict(zip(columns, row))
+        
+
+def create_inbound_message(
+    conversation_id: str,
+    provider_message_id: str | None,
+    message_type: str,
+    text_body: str | None,
+    intent: str | None,
+    from_phone: str,
+    to_phone: str,
+    raw_payload: dict | None = None,
+    related_shipment_id: str | None = None,
+    dedupe_key: str | None = None,
+    received_at: str | None = None,
+) -> dict:
+    query = """
+        insert into messages (
+            conversation_id,
+            provider_message_id,
+            direction,
+            message_type,
+            text_body,
+            intent,
+            status,
+            from_phone,
+            to_phone,
+            related_shipment_id,
+            raw_payload,
+            dedupe_key,
+            received_at
+        )
+        values (
+            %s,
+            %s,
+            'inbound',
+            %s,
+            %s,
+            %s,
+            'received',
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s
+        )
+        returning
+            id,
+            conversation_id,
+            provider_message_id,
+            direction,
+            message_type,
+            text_body,
+            intent,
+            status,
+            from_phone,
+            to_phone,
+            related_shipment_id,
+            raw_payload,
+            dedupe_key,
+            received_at,
+            created_at
+    """
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                query,
+                (
+                    conversation_id,
+                    provider_message_id,
+                    message_type,
+                    text_body,
+                    intent,
+                    from_phone,
+                    to_phone,
+                    related_shipment_id,
+                    Json(raw_payload) if raw_payload is not None else None,
+                    dedupe_key,
+                    received_at,
+                ),
+            )
+            row = cur.fetchone()
+            columns = [desc[0] for desc in cur.description]
             return dict(zip(columns, row))
